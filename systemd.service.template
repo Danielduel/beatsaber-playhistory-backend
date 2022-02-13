@@ -1,0 +1,15 @@
+[Unit]
+Description=${app-name} service
+
+[Service]
+Environment=NODE_VERSION=${node-version}
+ExecStart=${exec-start}
+WorkingDirectory=/opt/deployedapps/${app-name}
+Restart=always
+RestartSec=10
+
+# Output to syslog
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=${app-name}
+
