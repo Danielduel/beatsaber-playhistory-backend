@@ -22,12 +22,45 @@ EOM
 # Install dependencies
 # TODO: Cut that out and make template for template
 read -r -d '' DEPLOYMENT_DEPENDENCIES << EOM
+  mkdir -p ~/tools
+  cd ~/tools
+
+  sudo yum install git clang -y
+
   if ! command -v npm &> /dev/null
   then
     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash
     . ~/.nvm/nvm.sh
     nvm install 16
   fi
+
+  
+  if ! command -v cargo &> /dev/null
+  then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -sSf | sh -s -- -y
+    source \$HOME/.cargo/env
+  fi
+
+  if ! command -v redis-cli &> /dev/null
+  then
+    sudo amazon-linux-extras install redis6 -y
+  fi
+
+  if [ sudo -e /etc/redis/librejson.so ]
+  then
+    # exists
+    echo "ReJSON exists"
+  else
+    git clone --depth 1 --branch v2.0.6 https://github.com/RedisJSON/RedisJSON
+    cd RedisJSON
+    cargo build --release
+    sudo mv /home/${DEPLOYMENT_USER}/tools/RedisJSON/target/release/librejson.so /etc/redis
+    echo 'echo -e "\$LOAD_MODULE" >> /etc/redis/redis.conf' | sudo sh
+  fi
+
+  sudo systemctl stop redis.service
+  sudo systemctl enable redis.service
+  sudo systemctl start redis.service
 EOM
 
 
@@ -48,7 +81,9 @@ DEPLOYMENT_ZIP_LOCAL="./.deployment/.deploy.zip"
 rm -rf ./.deployment
 mkdir -p ./.deployment
 echo "$systemdService" >> ./.deployment/${APP_NAME}.service
-zip -rq ${DEPLOYMENT_ZIP_LOCAL} ${DEPLOYMENT_CONTENT} ./.deployment/${APP_NAME}.service
+cp ./secret.env ./.deployment/secret.env
+zip -rq ${DEPLOYMENT_ZIP_LOCAL} ${DEPLOYMENT_CONTENT} ./.deployment/${APP_NAME}.service ./.deployment/secret.env
+rm ./.deployment/secret.env
 
 # Displaying data about deployment zip
 echo -e "${F_BOLD}${C_GREY0}${C_WHEAT1}Deployment archive listing:\n ${NO_FORMAT}"
@@ -96,6 +131,11 @@ read -r -d '' EXTRACT_CMD << EOM
   # mkdir unzip_dir - not needed
   sudo unzip deployment.zip -d unzip_dir
 
+  # move secret.env to correct place
+  mkdir -p /home/${DEPLOYMENT_USER}/envs
+  sudo mv ./unzip_dir/.deployment/secret.env /home/${DEPLOYMENT_USER}/envs/${APP_NAME}.env
+  sudo chown -R ${DEPLOYMENT_USER} /home/${DEPLOYMENT_USER}/envs/${APP_NAME}.env
+
   # Stop service if running and replace new service file
   sudo systemctl stop ${APP_NAME}
   sudo systemctl disable ${APP_NAME}
@@ -110,6 +150,7 @@ read -r -d '' EXTRACT_CMD << EOM
   # Go into directory and execute install script
   cd /opt/deployedapps/${APP_NAME}
   ${DEPLOYMENT_DEPENDENCIES}
+  cd /opt/deployedapps/${APP_NAME}
   ${DEPLOYMENT_CMD}
 
   # Enable new service
